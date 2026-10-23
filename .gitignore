@@ -1,0 +1,8 @@
+data/
+__pycache__/
+*.pyc
+.env
+output/
+*-preview.png
+mobile-review.png
+mobile-report-verified.png
