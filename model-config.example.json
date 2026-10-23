@@ -1,0 +1,6 @@
+{
+  "AI_BASE_URL": "https://api.agnes-ai.cn/v1",
+  "AI_MODEL": "agnes-3.0-flash",
+  "AI_API_KEY": "",
+  "AI_PRIVACY_REVIEWED": "no"
+}
