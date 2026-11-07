@@ -70,8 +70,28 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(self.post('model-config', dict(body, baseUrl='http://example.com')).status_code, 400)
             self.assertFalse(self.post('model-config', dict(body, clearKey=True)).json['hasKey'])
             with patch.dict(os.environ, {'AI_MODEL': 'managed-model'}):
-                self.assertEqual(self.post('model-config', body).json['model'], 'managed-model')
+                self.assertEqual(self.post('model-config', body).json['model'], 'vision-test')
+                self.assertEqual(self.client.get('/api/model-config').json['managed'], [])
             self.assertEqual(self.client.post('/api/model-config', json=body).status_code, 403)
+
+    def test_web_settings_override_environment_defaults(self):
+        defaults = dict(AI_BASE_URL='https://default.example/v1', AI_MODEL='default-model',
+                        AI_API_KEY='environment-secret', AI_PRIVACY_REVIEWED='yes')
+        with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)), patch.dict(os.environ, defaults):
+            initial = self.client.get('/api/model-config').json
+            self.assertEqual(initial['model'], 'default-model')
+            self.assertTrue(initial['hasKey'])
+            body = dict(baseUrl='https://updated.example/v1', model='updated-model', apiKey='', privacyReviewed=False)
+            response = self.post('model-config', body)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json['baseUrl'], body['baseUrl'])
+            self.assertEqual(response.json['model'], body['model'])
+            self.assertTrue(response.json['hasKey'])
+            self.assertFalse(response.json['privacyReviewed'])
+            self.assertFalse(self.client.get('/api/state').json['aiReady'])
+            self.assertNotIn('environment-secret', response.get_data(as_text=True))
+            self.assertFalse(self.post('model-config', dict(body, clearKey=True)).json['hasKey'])
+            self.assertFalse(self.client.get('/api/model-config').json['hasKey'])
 
     def test_records_survive_new_process_until_explicit_delete(self):
         sid = self.student()
@@ -156,6 +176,14 @@ class WorkflowTests(unittest.TestCase):
         with patch('app.model', return_value={'questions': [{'kind': 'broken'}]}):
             self.assertEqual(self.post('batches/' + b['id'] + '/grade', {}).status_code, 400)
         self.assertEqual(len(get(b['id'])['questions']), 1)
+
+    def test_empty_draft_can_be_saved_but_not_confirmed(self):
+        b = self.upload(self.student()).json
+        self.post('batches/' + b['id'] + '/save', {'questions': [self.question()]})
+        response = self.post('batches/' + b['id'] + '/save', {'questions': [], 'confirm': False})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(get(b['id'])['questions'], [])
+        self.assertEqual(self.post('batches/' + b['id'] + '/save', {'questions': [], 'confirm': True}).status_code, 400)
 
     def test_correction_only_day_and_latest_result(self):
         sid = self.student()

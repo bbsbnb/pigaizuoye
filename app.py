@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import threading
+from contextlib import contextmanager
 from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,14 +36,19 @@ lock = threading.RLock()
 def model_config():
     path = DATA / 'model-config.json'
     saved = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
-    return {key: os.environ.get(key, saved.get(key, '')) for key in
+    return {key: saved.get(key, os.environ.get(key, '')) for key in
             ('AI_BASE_URL', 'AI_API_KEY', 'AI_MODEL', 'AI_PRIVACY_REVIEWED')}
 
 
+@contextmanager
 def db():
     con = sqlite3.connect(DATA / 'records.sqlite')
-    con.execute('CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, kind TEXT, body TEXT)')
-    return con
+    try:
+        with con:
+            con.execute('CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, kind TEXT, body TEXT)')
+            yield con
+    finally:
+        con.close()
 
 
 def put(kind, obj):
@@ -187,7 +193,7 @@ def public_model_config():
     config = model_config()
     return dict(baseUrl=config['AI_BASE_URL'], model=config['AI_MODEL'],
                 hasKey=bool(config['AI_API_KEY']), privacyReviewed=config['AI_PRIVACY_REVIEWED'] == 'yes',
-                managed=[k for k in config if k in os.environ])
+                managed=[])
 
 
 @app.get('/api/model-config')
@@ -217,9 +223,7 @@ def save_model_config():
             updates['AI_API_KEY'] = ''
         elif key:
             updates['AI_API_KEY'] = key
-        for field, value in updates.items():
-            if field not in os.environ:
-                saved[field] = value
+        saved.update(updates)
         temporary = path.with_suffix('.tmp')
         temporary.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding='utf-8')
         temporary.replace(path)
@@ -349,7 +353,8 @@ def save_batch(id):
         if b['status'] == 'confirmed':
             raise ValueError('已确认的首次记录不可覆盖，请通过订正记录后续变化')
         body = request.get_json()
-        b['questions'] = validate_questions(body.get('questions'), b['selected'] if b.get('parent') else None)
+        items = body.get('questions')
+        b['questions'] = [] if items == [] and not body.get('confirm') else validate_questions(items, b['selected'] if b.get('parent') else None)
         b['status'] = 'confirmed' if body.get('confirm') else 'review'
         if body.get('confirm'):
             b['confirmed_at'] = datetime.now(timezone.utc).isoformat()

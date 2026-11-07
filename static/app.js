@@ -7,7 +7,7 @@ function queueEdits(){
   const b=state?.batches.find(b=>b.id===currentBatch);
   if(b&&b.status!=='confirmed'&&$('#questions')){
     const questions=readQuestions();
-    if(questions.length&&JSON.stringify(questions)!==JSON.stringify(b.questions))storeEdit('batches/'+b.id+'/save',{questions,confirm:false});
+    if(JSON.stringify(questions)!==JSON.stringify(b.questions))storeEdit('batches/'+b.id+'/save',{questions,confirm:false});
   }
   const observation=$('#observation');
   if(observation&&currentStudent){const old=state.observations.find(o=>o.student===currentStudent&&o.date===currentDate)?.text||'';if(observation.value!==old)storeEdit('observations?student='+currentStudent+'&date='+currentDate,{student:currentStudent,date:currentDate,text:observation.value});}
@@ -114,8 +114,8 @@ function uploadModal(parent){
   modal(parent?'上传订正照片':'上传作业',`<form id="upload-form" data-parent="${parent?.id||''}" data-selected='${JSON.stringify(selected)}'><label>科目<select name="subject" ${parent?'disabled':''}>${['数学','语文','英语'].map(s=>`<option ${parent?.subject===s?'selected':''}>${s}</option>`).join('')}</select></label><label>作业日期<input type="date" name="date" value="${currentDate}" required></label><label>作业照片<input class="file-input" type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple></label><label>直接拍照<input type="file" id="camera" accept="image/*" capture="environment"></label><p class="muted">JPG、PNG、WebP · 每批最多12张 · 总计32MB</p><button class="primary" type="submit">上传并进入审核</button></form>`);
 }
 async function modelConfigModal(){
-  const c=await api('model-config',undefined,'GET'), managed=key=>c.managed.includes(key)?'disabled':'';
-  modal('模型配置',`<form id="model-config-form"><label>接口地址<input name="baseUrl" type="url" placeholder="https://api.example.com/v1" value="${esc(c.baseUrl)}" ${managed('AI_BASE_URL')}></label><label>模型名称<input name="model" value="${esc(c.model)}" maxlength="200" ${managed('AI_MODEL')}></label><label>API 密钥<input name="apiKey" type="password" autocomplete="new-password" placeholder="${c.hasKey?'已保存，留空保持不变':'尚未配置'}" ${managed('AI_API_KEY')}></label>${c.hasKey&&!c.managed.includes('AI_API_KEY')?'<label class="check"><input name="clearKey" type="checkbox">清除已保存密钥</label>':''}<label class="check"><input name="privacyReviewed" type="checkbox" ${c.privacyReviewed?'checked':''} ${managed('AI_PRIVACY_REVIEWED')}>已核实服务商隐私政策，并取得作业图片 AI 处理的必要授权</label>${c.managed.length?'<p class="muted">部分配置由服务器环境变量管理。</p>':''}<div class="actions"><button class="primary" type="submit">${icon('check')}保存配置</button>${button('取消','close')}</div></form>`);
+  const c=await api('model-config',undefined,'GET');
+  modal('模型配置',`<form id="model-config-form"><label>接口地址<input name="baseUrl" type="url" placeholder="https://api.example.com/v1" value="${esc(c.baseUrl)}"></label><label>模型名称<input name="model" value="${esc(c.model)}" maxlength="200"></label><label>API 密钥<input name="apiKey" type="password" autocomplete="new-password" placeholder="${c.hasKey?'已保存，留空保持不变':'尚未配置'}"></label>${c.hasKey?'<label class="check"><input name="clearKey" type="checkbox">清除已保存密钥</label>':''}<label class="check"><input name="privacyReviewed" type="checkbox" ${c.privacyReviewed?'checked':''}>已核实服务商隐私政策，并取得作业图片 AI 处理的必要授权</label><div class="actions"><button class="primary" type="submit">${icon('check')}保存配置</button>${button('取消','close')}</div></form>`);
 }
 async function generate(kind){
   const start=new Date(currentDate+'T00:00:00Z');if(kind==='weekly')start.setUTCDate(start.getUTCDate()-((start.getUTCDay()+6)%7));
@@ -124,13 +124,13 @@ async function generate(kind){
   await api('reports',{student:currentStudent,date:currentDate,kind,replace:Boolean(existing)});activeTab='reports';await refresh();toast('报告草稿已生成，请审核文字后分享');
 }
 document.addEventListener('input',e=>{if(!e.target.matches('[data-field],#observation,.report-text'))return;queueEdits();clearTimeout(saveTimer);saveTimer=setTimeout(()=>flushEdits().catch(err=>toast('自动保存失败，草稿已保留在本机：'+err.message)),600);});
-document.addEventListener('change',async e=>{if(e.target.id==='date'){try{queueEdits();await flushEdits();currentDate=e.target.value;if(currentDate)render();}catch(err){e.target.value=currentDate;toast(err.message);}}});
+document.addEventListener('change',async e=>{if(e.target.matches('select[data-field]')){queueEdits();flushEdits().catch(err=>toast(err.message));}if(e.target.id==='date'){try{queueEdits();await flushEdits();currentDate=e.target.value;if(currentDate)render();}catch(err){e.target.value=currentDate;toast(err.message);}}});
 window.addEventListener('beforeunload',e=>{queueEdits();if(Object.keys(pendingEdits()).length){e.preventDefault();e.returnValue='';}});
 document.addEventListener('click',async e=>{
   const el=e.target.closest('[data-action]');if(!el)return;
   const action=el.dataset.action;el.disabled=true;
   try{
-    queueEdits();await flushEdits();
+    if(!['close','model-config','help','feedback','save-feedback'].includes(action)){queueEdits();await flushEdits();}
     if(action==='close')closeModal();
     else if(action==='model-config')await modelConfigModal();
     else if(action==='profile')modal('教师工作台',`<div class="actions">${button(showArchived?'查看在读学生':'查看归档学生','toggle-archived')}${button('模型配置','model-config','','settings')}</div>`);
