@@ -1,6 +1,10 @@
 import io
 import os
 import tempfile
+import subprocess
+import sys
+import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -13,8 +17,6 @@ class WorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = app.test_client()
-        cls.csrf = cls.client.get('/api/state').json['csrf']
-        cls.client.post('/api/auth', json={'password': 'test-password-123', 'consent': True}, headers={'X-CSRF-Token': cls.csrf})
         cls.csrf = cls.client.get('/api/state').json['csrf']
 
     def post(self, url, body):
@@ -35,10 +37,64 @@ class WorkflowTests(unittest.TestCase):
         return dict(id='q1', kind='objective', verdict='wrong', label='1', text='2+3', answer='6',
                     explanation='加法错误', reference='5', knowledge='加法', **kw)
 
-    def test_auth_and_csrf(self):
+    def test_passwordless_access_and_csrf(self):
         anonymous = app.test_client()
-        self.assertEqual(anonymous.get('/photo/anything.jpg').status_code, 401)
+        response = anonymous.get('/api/state')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('students', response.json)
+        self.assertIn('batches', response.json)
+        self.assertEqual(anonymous.post('/api/students', json={'name': '无令牌'}).status_code, 403)
+        self.assertEqual(anonymous.post('/api/students', json={'name': '免密码测试'},
+                         headers={'X-CSRF-Token': response.json['csrf']}).status_code, 200)
         self.assertEqual(self.client.post('/api/students', json={'name': '无令牌'}).status_code, 403)
+
+    def test_remote_access_rejected(self):
+        for path in ('/', '/api/state', '/photo/anything.jpg', '/static/app.js'):
+            with self.subTest(path=path):
+                self.assertEqual(app.test_client().get(path, environ_overrides={'REMOTE_ADDR': '192.168.1.20'}).status_code, 403)
+
+    def test_model_configuration(self):
+        with tempfile.TemporaryDirectory() as folder, patch('app.DATA', Path(folder)), patch.dict(os.environ, {}, clear=True):
+            body = dict(baseUrl='https://example.com/v1/', model='vision-test', apiKey='secret-test-key', privacyReviewed=False)
+            response = self.post('model-config', body)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('secret-test-key', response.get_data(as_text=True))
+            self.assertTrue(response.json['hasKey'])
+            self.assertFalse(self.client.get('/api/state').json['aiReady'])
+            body.update(apiKey='', privacyReviewed=True)
+            self.assertEqual(self.post('model-config', body).status_code, 200)
+            saved = json.loads((Path(folder) / 'model-config.json').read_text(encoding='utf-8'))
+            self.assertEqual(saved['AI_API_KEY'], 'secret-test-key')
+            self.assertTrue(self.client.get('/api/state').json['aiReady'])
+            self.assertNotIn('secret-test-key', self.client.get('/api/model-config').get_data(as_text=True))
+            self.assertEqual(self.post('model-config', dict(body, baseUrl='http://example.com')).status_code, 400)
+            self.assertFalse(self.post('model-config', dict(body, clearKey=True)).json['hasKey'])
+            with patch.dict(os.environ, {'AI_MODEL': 'managed-model'}):
+                self.assertEqual(self.post('model-config', body).json['model'], 'managed-model')
+            self.assertEqual(self.client.post('/api/model-config', json=body).status_code, 403)
+
+    def test_records_survive_new_process_until_explicit_delete(self):
+        sid = self.student()
+        batch = self.upload(sid).json
+        self.post('batches/' + batch['id'] + '/save', {'questions': [self.question()], 'confirm': True})
+        self.post('observations', {'student': sid, 'date': batch['date'], 'text': '能说明思路'})
+        report = self.post('reports', {'student': sid, 'date': batch['date'], 'kind': 'daily'}).json
+        script = "from app import app; import json; print(json.dumps(app.test_client().get('/api/state').json))"
+        result = subprocess.run([sys.executable, '-c', script], cwd=os.path.dirname(os.path.dirname(__file__)),
+                                capture_output=True, text=True, check=True)
+        restored = json.loads(result.stdout)
+        self.assertIn(sid, [s['id'] for s in restored['students']])
+        saved = next(b for b in restored['batches'] if b['id'] == batch['id'])
+        self.assertEqual(saved['questions'][0]['answer'], '6')
+        self.assertEqual(saved['status'], 'confirmed')
+        self.assertIn(report['id'], [r['id'] for r in restored['reports']])
+        self.assertTrue(any(o['student'] == sid for o in restored['observations']))
+        with self.client.get('/photo/' + batch['photos'][0]) as response:
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.delete('/api/students/' + sid, headers={'X-CSRF-Token': self.csrf}).status_code, 200)
+        remaining = self.client.get('/api/state').json
+        for kind in ('batches', 'reports', 'observations'):
+            self.assertFalse(any(item['student'] == sid for item in remaining[kind]))
 
     def test_gender_saved_and_not_sent_to_model(self):
         s = self.post('students', {'name': '隐私测试昵称', 'gender': '女'}).json

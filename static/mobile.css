@@ -1,0 +1,34 @@
+#mobile-nav{display:none}
+@media(max-width:540px){
+  html{background:#f6faf9}
+  body{margin:0;min-height:100dvh;border:0;border-radius:0;box-shadow:none;padding-bottom:calc(65px + env(safe-area-inset-bottom))}
+  header{height:58px;border-radius:0;padding:0 18px;gap:8px}
+  .brand{font-size:23px}.brand span{font-size:10px;border:0;padding:0;margin-left:10px}
+  #account{gap:12px}#account .account-label{display:none}#account button[data-action="model-config"]{width:32px;height:40px;font-size:0;padding:0}#account button[data-action="model-config"] .icon{width:18px;height:18px}
+  #account .profile-button{display:flex;min-height:40px;gap:5px}#account .profile-button img{width:24px;height:26px}
+  main.dashboard{padding:0 16px}
+  .dashboard-hero{height:140px;margin:0 -16px 20px;padding:22px 20px;background-size:auto 92%;background-position:right bottom}
+  .dashboard-hero:before{background:linear-gradient(90deg,#eaf8f5 0%,#eaf8f5 30%,#eaf8f5c9 49%,transparent 70%)}
+  .hero-date{font-size:11px;gap:6px}.hero-date .icon{width:16px;height:16px}
+  .dashboard-hero h1{font-size:28px;margin:8px 0 9px}.dashboard-hero p{font-size:10px;max-width:220px;white-space:nowrap}
+  .student-heading{gap:8px}.student-add{min-height:36px;padding:6px 8px;font-size:11px;border-radius:8px}.student-add .icon{width:15px;height:15px}.student-heading h2{white-space:nowrap}
+  .dashboard-metrics{margin:0 0 20px;gap:8px;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .dashboard-metric{min-height:140px;flex-direction:column;justify-content:flex-start;gap:9px;padding:13px 5px 12px;border-radius:8px;text-align:center}
+  .metric-icon{width:39px;height:39px}.metric-icon .icon{width:21px;height:21px}.metric-label{font-size:11px;white-space:normal;line-height:1.5;display:block}
+  .metric-number{justify-content:center;margin-top:7px;gap:4px}.metric-number strong{font-size:27px}.metric-number>span{font-size:10px}
+  .dashboard-section{padding:0;margin:0 0 20px;border:0;background:transparent;box-shadow:none;border-radius:0}
+  .dashboard-section .section-title{padding:0 6px;margin-bottom:12px;min-height:24px}.dashboard-section h2{font-size:14px;gap:7px}.dashboard-section h2>.icon{width:16px;height:17px}.section-more{font-size:10px}
+  .student-row{min-height:94px;padding:15px 16px;background:#fff;border:1px solid #edf1f4;border-radius:8px;gap:13px;align-items:center;box-shadow:0 3px 12px #243e4c03}
+  .student-list{grid-template-columns:minmax(0,1fr);gap:10px}
+  .student-row .avatar{width:43px;height:43px;font-size:22px}.student-info{padding:0}.student-info>strong{font-size:14px}.student-info .muted{font-size:10px;margin-top:3px}.student-info .badge{margin-top:6px;font-size:9px;padding:2px 8px}
+  .student-detail{font-size:0;width:30px;height:30px;min-height:30px;padding:0;border:0;border-radius:50%;background:#edf1f5;margin:0;flex:none;box-shadow:none}
+  .student-detail .icon{display:none!important}.student-detail:after{content:'\203A';font-size:22px;line-height:1;color:#586979}
+  .activity-empty{height:157px;background:#fff;border:1px solid #eef1f4;border-radius:8px}.activity-empty img{width:100px;height:67px}.activity-empty p{font-size:10px;margin-top:9px}
+  .dashboard-footer{display:none}
+  #mobile-nav{display:flex;position:fixed;left:0;right:0;bottom:0;height:calc(59px + env(safe-area-inset-bottom));padding:4px 20px calc(4px + env(safe-area-inset-bottom));background:#fffffff5;border-top:1px solid #e7ecef;z-index:30;backdrop-filter:blur(12px)}
+  #mobile-nav button{flex:1;flex-direction:column;border:0;background:none;gap:2px;color:#8190a0;font-size:10px;padding:4px;min-height:48px;border-radius:0;position:relative}
+  #mobile-nav .icon{width:22px;height:22px}#mobile-nav .active{color:#07845b}#mobile-nav .active:after{content:'';position:absolute;bottom:0;width:38px;height:2px;background:#13966d;border-radius:2px}
+  #toast{bottom:calc(72px + env(safe-area-inset-bottom))}
+  main:not(.dashboard){padding:22px 16px 30px}dialog{max-height:calc(100dvh - 32px)}
+}
+@media(max-width:350px){.dashboard-hero h1{font-size:25px}.dashboard-hero p{font-size:9px}.metric-label{font-size:10px}.dashboard-metric{min-height:130px}.student-row{padding:13px 11px}}

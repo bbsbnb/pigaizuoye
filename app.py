@@ -7,17 +7,19 @@ import re
 import secrets
 import sqlite3
 import threading
-import time
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
 from flask import Flask, jsonify, request, session, send_file
 from PIL import Image, UnidentifiedImageError, ImageOps
-from werkzeug.security import check_password_hash, generate_password_hash
 
-ROOT = Path(__file__).parent
-DATA = Path(os.environ.get('DATA_DIR', ROOT / 'data'))
+ROOT = Path(__file__).resolve().parent
+DATA = Path(os.environ.get('DATA_DIR', ROOT / 'data')).expanduser()
+if not DATA.is_absolute():
+    DATA = ROOT / DATA
+DATA = DATA.resolve()
 DATA.mkdir(parents=True, exist_ok=True)
 (DATA / 'photos').mkdir(exist_ok=True)
 secret_file = DATA / 'secret'
@@ -28,7 +30,6 @@ app.secret_key = secret_file.read_text()
 app.config.update(MAX_CONTENT_LENGTH=32 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True,
                   SESSION_COOKIE_SAMESITE='Strict', SESSION_COOKIE_SECURE=os.getenv('COOKIE_SECURE') == '1')
 lock = threading.RLock()
-login_attempts = {}
 
 
 def model_config():
@@ -138,9 +139,9 @@ def model(messages):
 
 @app.before_request
 def protect():
+    if request.remote_addr not in ('127.0.0.1', '::1'):
+        return jsonify(error='免密码模式仅允许本机访问'), 403
     if request.path.startswith('/api/') or request.path.startswith('/photo/'):
-        if request.path not in ('/api/auth', '/api/state') and not session.get('teacher'):
-            return jsonify(error='请先登录'), 401
         if request.method not in ('GET', 'HEAD'):
             if request.headers.get('X-CSRF-Token') != session.get('csrf') or not session.get('csrf'):
                 return jsonify(error='页面已过期，请刷新后重试'), 403
@@ -173,45 +174,56 @@ def index():
 @app.get('/api/state')
 def state():
     session.setdefault('csrf', secrets.token_hex(24))
-    base = dict(csrf=session['csrf'], setup=not bool(allof('account')), authenticated=bool(session.get('teacher')), today=today())
-    if session.get('teacher'):
-        reports = allof('report')
-        for r in reports:
-            r['stale'] = r['fingerprint'] != fingerprint(r['student'])
-        base.update(students=allof('student'), batches=allof('batch'), observations=allof('observation'), reports=reports,
-                    aiReady=all(model_config()[k] for k in ('AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL')) and model_config()['AI_PRIVACY_REVIEWED'] == 'yes')
+    base = dict(csrf=session['csrf'], today=today())
+    reports = allof('report')
+    for r in reports:
+        r['stale'] = r['fingerprint'] != fingerprint(r['student'])
+    base.update(students=allof('student'), batches=allof('batch'), observations=allof('observation'), reports=reports,
+                aiReady=all(model_config()[k] for k in ('AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL')) and model_config()['AI_PRIVACY_REVIEWED'] == 'yes')
     return jsonify(base)
 
 
-@app.post('/api/auth')
-def auth():
+def public_model_config():
+    config = model_config()
+    return dict(baseUrl=config['AI_BASE_URL'], model=config['AI_MODEL'],
+                hasKey=bool(config['AI_API_KEY']), privacyReviewed=config['AI_PRIVACY_REVIEWED'] == 'yes',
+                managed=[k for k in config if k in os.environ])
+
+
+@app.get('/api/model-config')
+def read_model_config():
+    return jsonify(public_model_config())
+
+
+@app.post('/api/model-config')
+def save_model_config():
     body = request.get_json()
+    if not isinstance(body, dict):
+        raise ValueError('配置格式无效')
+    endpoint = str(body.get('baseUrl', '')).strip().rstrip('/')
+    name = str(body.get('model', '')).strip()
+    key = str(body.get('apiKey', '')).strip()
+    parsed = urlsplit(endpoint)
+    if endpoint and (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment):
+        raise ValueError('接口地址必须是无用户名、密码及查询参数的 HTTPS 地址')
+    if len(endpoint) > 2000 or len(name) > 200 or len(key) > 4096:
+        raise ValueError('配置内容过长')
     with lock:
-        address = request.remote_addr
-        recent = [t for t in login_attempts.get(address, []) if time.monotonic() - t < 300]
-        login_attempts[address] = recent
-        if len(recent) >= 10:
-            return jsonify(error='尝试次数过多，请五分钟后重试'), 429
-        accounts = allof('account')
-        password = body.get('password', '')
-        if not accounts:
-            if len(password) < 12 or not body.get('consent'):
-                raise ValueError('请设置至少12位密码，并确认监护人授权')
-            put('account', {'id': 'teacher', 'hash': generate_password_hash(password), 'consent_at': today()})
-        elif not check_password_hash(accounts[0]['hash'], password):
-            login_attempts[address].append(time.monotonic())
-            raise ValueError('密码不正确')
-        login_attempts.pop(address, None)
-        session.clear()
-        session['teacher'] = True
-        session['csrf'] = secrets.token_hex(24)
-    return jsonify(ok=True)
-
-
-@app.post('/api/logout')
-def logout():
-    session.clear()
-    return jsonify(ok=True)
+        path = DATA / 'model-config.json'
+        saved = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+        updates = {'AI_BASE_URL': endpoint, 'AI_MODEL': name,
+                   'AI_PRIVACY_REVIEWED': 'yes' if body.get('privacyReviewed') is True else 'no'}
+        if body.get('clearKey') is True:
+            updates['AI_API_KEY'] = ''
+        elif key:
+            updates['AI_API_KEY'] = key
+        for field, value in updates.items():
+            if field not in os.environ:
+                saved[field] = value
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding='utf-8')
+        temporary.replace(path)
+    return jsonify(public_model_config())
 
 
 @app.post('/api/students')
